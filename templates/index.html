@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>GitHub Sentinel v3</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet"/>
+<link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet"/>
+</head>
+<body>
+<canvas id="bgCanvas"></canvas>
+<div class="scanlines"></div>
+
+<!-- NAV -->
+<nav class="topnav">
+  <div class="nav-wrap">
+    <div class="brand">
+      <div class="brand-icon"><i class="fas fa-shield-virus"></i></div>
+      <div><div class="brand-name">SENTINEL</div><div class="brand-ver">v3 · MASS SCANNER</div></div>
+    </div>
+    <div class="nav-tabs">
+      <button class="ntab active" data-view="dashboard" onclick="go('dashboard',this)"><i class="fas fa-gauge-high"></i> Dashboard</button>
+      <button class="ntab" data-view="scanner" onclick="go('scanner',this)"><i class="fas fa-satellite-dish"></i> Scanner</button>
+      <button class="ntab" data-view="queue" onclick="go('queue',this)"><i class="fas fa-layer-group"></i> Queue <span id="qBadge" class="nbadge" style="display:none">0</span></button>
+      <button class="ntab" data-view="results" onclick="go('results',this)"><i class="fas fa-chart-bar"></i> Results <span id="rBadge" class="nbadge" style="display:none">0</span></button>
+      <button class="ntab" data-view="alerts" onclick="go('alerts',this)"><i class="fas fa-bell"></i> Alerts</button>
+      <button class="ntab" data-view="patterns" onclick="go('patterns',this)"><i class="fas fa-database"></i> Patterns</button>
+    </div>
+    <div class="nav-right">
+      <div class="rate-meter" id="rateMeter"><i class="fas fa-gauge-high"></i> <span id="rateVal">—</span></div>
+      <a href="/logout" class="logout-btn" title="Logout"><i class="fas fa-right-from-bracket"></i></a>
+    </div>
+  </div>
+</nav>
+
+<!-- ══════════ DASHBOARD ══════════ -->
+<div class="view active" id="view-dashboard">
+  <div class="container pt-4">
+    <div class="page-head"><div class="page-tag">OVERVIEW</div><h2 class="page-title">Security Dashboard</h2></div>
+    <div class="row g-3 mb-4" id="globalStats">
+      <div class="col-6 col-md-3"><div class="stat-tile"><div class="st-icon"><i class="fas fa-briefcase"></i></div><div class="st-val" id="gs-jobs">—</div><div class="st-lbl">Total Jobs</div></div></div>
+      <div class="col-6 col-md-3"><div class="stat-tile"><div class="st-icon"><i class="fas fa-code-branch"></i></div><div class="st-val" id="gs-repos">—</div><div class="st-lbl">Repos Scanned</div></div></div>
+      <div class="col-6 col-md-3"><div class="stat-tile critical"><div class="st-icon"><i class="fas fa-skull"></i></div><div class="st-val" id="gs-findings">—</div><div class="st-lbl">Total Findings</div></div></div>
+      <div class="col-6 col-md-3"><div class="stat-tile high"><div class="st-icon"><i class="fas fa-paper-plane"></i></div><div class="st-val" id="gs-alerts">—</div><div class="st-lbl">Alerts Sent</div></div></div>
+    </div>
+    <div class="row g-3 mb-4">
+      <div class="col-md-6"><div class="dash-card"><div class="dash-card-head"><i class="fas fa-fire me-2"></i>Top Secret Types Found</div><div id="topTypes" class="dash-card-body"></div></div></div>
+      <div class="col-md-6"><div class="dash-card"><div class="dash-card-head"><i class="fas fa-clock-rotate-left me-2"></i>Recent Jobs</div><div id="recentJobs" class="dash-card-body"></div></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ SCANNER ══════════ -->
+<div class="view" id="view-scanner">
+  <div class="container pt-4">
+    <div class="page-head"><div class="page-tag">INPUT</div><h2 class="page-title">Mass Repository Scanner</h2></div>
+
+    <!-- Token + options bar -->
+    <div class="config-bar mb-4">
+      <div class="cb-item flex-grow-1">
+        <div class="flbl"><i class="fas fa-key me-1"></i> GitHub Token <span class="flbl-hint">(strongly recommended)</span></div>
+        <div class="inp-wrap"><input type="password" id="ghToken" class="inp" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"/><button class="eye-btn" onclick="toggleEye('ghToken',this)"><i class="fas fa-eye"></i></button></div>
+      </div>
+      <div class="cb-item">
+        <div class="flbl">Max Repos</div>
+        <input type="number" id="maxRepos" class="inp" value="30" min="1" max="200" style="width:90px"/>
+      </div>
+      <div class="cb-item">
+        <label class="toggle-row"><input type="checkbox" id="optHistory"/><span class="tgl"></span><span class="tgl-lbl">Scan commit history</span></label>
+      </div>
+      <button class="btn-rate" onclick="checkRate()"><i class="fas fa-gauge-high me-1"></i> Rate Limit</button>
+    </div>
+
+    <!-- Input mode tabs -->
+    <div class="itab-bar">
+      <button class="itab active" onclick="switchMode('user',this)"><i class="fas fa-at me-1"></i> User / Org</button>
+      <button class="itab" onclick="switchMode('list',this)"><i class="fas fa-list me-1"></i> Manual List</button>
+      <button class="itab" onclick="switchMode('paste',this)"><i class="fas fa-clipboard me-1"></i> Bulk Paste</button>
+    </div>
+
+    <!-- User/Org panel -->
+    <div class="imode active" id="mode-user">
+      <div class="mode-inner">
+        <div class="row g-3 align-items-end">
+          <div class="col-md-7">
+            <div class="flbl">GitHub Username or Organization</div>
+            <div class="inp-wrap"><i class="fas fa-at inp-pfx"></i><input type="text" id="handleInput" class="inp with-pfx" placeholder="e.g. stripe, torvalds, microsoft"/></div>
+          </div>
+          <div class="col-md-5">
+            <button class="btn-discover w-100" onclick="discoverRepos()"><i class="fas fa-radar me-2"></i>Discover Repositories</button>
+          </div>
+        </div>
+        <div id="discoverPane" style="display:none;margin-top:20px">
+          <div class="discover-top">
+            <div id="discoveredUser" class="disc-user"></div>
+            <div class="d-flex gap-2 flex-wrap">
+              <span id="discCountLabel" class="disc-count"></span>
+              <button class="btn-xs" onclick="selectDisc(true)">All</button>
+              <button class="btn-xs" onclick="selectDisc(false)">None</button>
+            </div>
+          </div>
+          <div id="discGrid" class="disc-grid"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Manual list panel -->
+    <div class="imode" id="mode-list">
+      <div class="mode-inner">
+        <div class="flbl">Add repository (owner/repo or full URL)</div>
+        <div class="d-flex gap-2">
+          <div class="inp-wrap flex-grow-1"><i class="fas fa-github inp-pfx"></i><input id="singleRepo" class="inp with-pfx" placeholder="octocat/Hello-World" onkeydown="if(event.key==='Enter')addRepo()"/></div>
+          <button class="btn-add" onclick="addRepo()"><i class="fas fa-plus me-1"></i>Add</button>
+        </div>
+        <div id="repoTags" class="tag-list mt-3"></div>
+      </div>
+    </div>
+
+    <!-- Bulk paste panel -->
+    <div class="imode" id="mode-paste">
+      <div class="mode-inner">
+        <div class="flbl">Paste repos — one per line (owner/repo or URL)</div>
+        <textarea id="pasteBox" class="inp textarea-big" rows="9" placeholder="facebook/react&#10;vuejs/vue&#10;https://github.com/expressjs/express&#10;laravel/laravel"></textarea>
+        <button class="btn-parse mt-2" onclick="parsePaste()"><i class="fas fa-wand-magic-sparkles me-1"></i>Parse &amp; Queue</button>
+      </div>
+    </div>
+
+    <!-- Launch bar -->
+    <div class="launch-bar">
+      <div class="lbar-left"><i class="fas fa-layer-group me-2" style="color:var(--acc)"></i><span id="qCount">0 repos queued</span></div>
+      <button class="btn-launch" id="btnLaunch" onclick="launchScan()"><i class="fas fa-bolt me-2"></i><span id="launchLbl">Launch Mass Scan</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ QUEUE ══════════ -->
+<div class="view" id="view-queue">
+  <div class="container pt-4">
+    <div class="page-head">
+      <div><div class="page-tag">LIVE</div><h2 class="page-title">Scan Queue</h2></div>
+      <span class="live-dot"><span class="blink-dot"></span>Live</span>
+    </div>
+    <div id="jobList"></div>
+    <div id="noJobs" class="empty-state"><i class="fas fa-satellite-dish"></i><h4>No scans yet</h4><p>Launch a scan from the Scanner tab.</p></div>
+  </div>
+</div>
+
+<!-- ══════════ RESULTS ══════════ -->
+<div class="view" id="view-results">
+  <div class="container pt-4">
+    <div class="page-head">
+      <div><div class="page-tag">FINDINGS</div><h2 class="page-title">Scan Results</h2></div>
+      <div class="d-flex gap-2 flex-wrap align-items-center">
+        <select class="inp inp-sm" id="jobSelector" onchange="switchJob(this.value)"><option value="">— Select Job —</option></select>
+        <button class="btn-xs" onclick="exportCsv()"><i class="fas fa-download me-1"></i>CSV</button>
+        <button class="btn-xs" onclick="exportJson()"><i class="fas fa-code me-1"></i>JSON</button>
+        <button class="btn-xs" onclick="exportReport()"><i class="fas fa-file-code me-1"></i>HTML Report</button>
+      </div>
+    </div>
+
+    <!-- Aggregate bar -->
+    <div class="agg-bar" id="aggBar" style="display:none">
+      <div class="agg-cell"><div class="agg-n" id="aggR">0</div><div class="agg-l">Repos</div></div>
+      <div class="agg-sep"></div>
+      <div class="agg-cell"><div class="agg-n crit" id="aggF">0</div><div class="agg-l">Findings</div></div>
+      <div class="agg-sep"></div>
+      <div class="agg-cell"><div class="agg-n crit" id="aggC">0</div><div class="agg-l">Critical</div></div>
+      <div class="agg-sep"></div>
+      <div class="agg-cell"><div class="agg-n hi" id="aggH">0</div><div class="agg-l">High</div></div>
+      <div class="agg-sep"></div>
+      <div class="agg-cell"><div class="agg-n med" id="aggM">0</div><div class="agg-l">Medium</div></div>
+      <div class="agg-sep"></div>
+      <div class="agg-cell"><div class="agg-n" id="aggNew" style="color:#00e676">0</div><div class="agg-l">New (diff)</div></div>
+      <div class="agg-sep"></div>
+      <div class="agg-cell"><div class="agg-n" id="aggFixed" style="color:#f97316">0</div><div class="agg-l">Fixed (diff)</div></div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="results-tb" id="resultsTb" style="display:none">
+      <div class="d-flex gap-2 flex-wrap">
+        <button class="fbtn active" onclick="filterRes('all',this)">All</button>
+        <button class="fbtn" onclick="filterRes('critical',this)">🔴 Critical</button>
+        <button class="fbtn" onclick="filterRes('high',this)">🟠 High</button>
+        <button class="fbtn" onclick="filterRes('medium',this)">🟡 Medium</button>
+        <button class="fbtn" onclick="filterRes('new',this)">🆕 New</button>
+        <button class="fbtn" onclick="filterRes('clean',this)">✅ Clean</button>
+        <button class="fbtn" onclick="filterRes('history',this)">📜 History</button>
+      </div>
+      <div class="d-flex gap-2 flex-wrap align-items-center">
+        <input type="text" class="inp inp-sm" id="searchBox" placeholder="Search repo / file / type…" oninput="renderResults()"/>
+        <select class="inp inp-sm" id="sortSel" onchange="renderResults()">
+          <option value="risk">Risk ↓</option>
+          <option value="findings">Findings ↓</option>
+          <option value="name">Name A–Z</option>
+          <option value="new">New Findings ↓</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="resultsGrid"></div>
+    <div id="noResults" class="empty-state"><i class="fas fa-chart-bar"></i><h4>No results yet</h4><p>Select a completed job above.</p></div>
+  </div>
+</div>
+
+<!-- ══════════ ALERTS ══════════ -->
+<div class="view" id="view-alerts">
+  <div class="container pt-4">
+    <div class="page-head"><div class="page-tag">NOTIFY</div><h2 class="page-title">Alert &amp; Notify</h2></div>
+
+    <div class="row g-3 mb-4">
+      <!-- Email -->
+      <div class="col-md-6">
+        <div class="alert-card">
+          <div class="ac-head"><i class="fas fa-envelope me-2"></i> Email Alert</div>
+          <div class="ac-body">
+            <div class="flbl mb-1">Job</div>
+            <select class="inp mb-3" id="alertJobSel"><option value="">— Select Job —</option></select>
+            <div class="flbl mb-1">Recipient Email</div>
+            <div class="inp-wrap mb-2"><i class="fas fa-envelope inp-pfx"></i><input type="email" class="inp with-pfx" id="alertEmail" placeholder="owner@example.com"/></div>
+            <div class="row g-2 mb-2">
+              <div class="col-7"><div class="flbl mb-1">SMTP Host</div><input class="inp" id="smtpHost" placeholder="smtp.gmail.com"/></div>
+              <div class="col-5"><div class="flbl mb-1">Port</div><input type="number" class="inp" id="smtpPort" value="587"/></div>
+            </div>
+            <div class="row g-2 mb-3">
+              <div class="col-6"><div class="flbl mb-1">SMTP User</div><input class="inp" id="smtpUser" placeholder="you@gmail.com"/></div>
+              <div class="col-6"><div class="flbl mb-1">Password</div><input type="password" class="inp" id="smtpPass" placeholder="App password"/></div>
+            </div>
+            <div class="d-flex gap-2">
+              <button class="btn-send-alert" onclick="doEmailAlert()"><i class="fas fa-paper-plane me-1"></i> Send</button>
+              <button class="btn-preview-alert" onclick="previewEmail()"><i class="fas fa-eye me-1"></i> Preview</button>
+            </div>
+            <div id="emailStatus" class="alert-status mt-2" style="display:none"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Webhook + GitHub Issues -->
+      <div class="col-md-6">
+        <div class="alert-card mb-3">
+          <div class="ac-head"><i class="fas fa-webhook me-2"></i> Webhook</div>
+          <div class="ac-body">
+            <div class="flbl mb-1">Webhook URL</div>
+            <div class="inp-wrap mb-3"><i class="fas fa-link inp-pfx"></i><input class="inp with-pfx" id="webhookUrl" placeholder="https://hooks.example.com/notify"/></div>
+            <button class="btn-send-alert" onclick="doWebhook()"><i class="fas fa-paper-plane me-1"></i> Send Webhook</button>
+            <div id="webhookStatus" class="alert-status mt-2" style="display:none"></div>
+          </div>
+        </div>
+        <div class="alert-card">
+          <div class="ac-head"><i class="fas fa-github me-2"></i> GitHub Issues</div>
+          <div class="ac-body">
+            <p class="hint mb-2">Opens a private security issue directly on each affected repo. Requires a token with <code>repo</code> scope.</p>
+            <div class="flbl mb-1">GitHub Token (write scope)</div>
+            <div class="inp-wrap mb-3"><i class="fas fa-key inp-pfx"></i><input type="password" class="inp with-pfx" id="issueToken" placeholder="ghp_…"/></div>
+            <button class="btn-send-alert" onclick="doGithubIssues()"><i class="fas fa-circle-exclamation me-1"></i> Create Issues</button>
+            <div id="issueStatus" class="alert-status mt-2" style="display:none"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Alert log -->
+    <div class="dash-card">
+      <div class="dash-card-head"><i class="fas fa-scroll me-2"></i> Alert History</div>
+      <div class="dash-card-body p-0" id="alertLog">
+        <div class="hint p-3">No alerts sent yet.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ PATTERNS ══════════ -->
+<div class="view" id="view-patterns">
+  <div class="container pt-4">
+    <div class="page-head">
+      <div><div class="page-tag">LIBRARY</div><h2 class="page-title">Pattern Library</h2></div>
+      <span id="patCount" class="hint"></span>
+    </div>
+    <div class="d-flex gap-2 mb-3 flex-wrap">
+      <input class="inp flex-grow-1" id="patSearch" placeholder="Search patterns…" oninput="renderPatterns()"/>
+      <select class="inp" id="patCat" onchange="renderPatterns()"><option value="">All Categories</option></select>
+      <select class="inp" id="patSev" onchange="renderPatterns()"><option value="">All Severities</option><option>critical</option><option>high</option><option>medium</option><option>low</option></select>
+    </div>
+    <div id="patGrid" class="pat-grid"></div>
+  </div>
+</div>
+
+<!-- ══════════ MODALS ══════════ -->
+<!-- Repo detail -->
+<div class="modal fade" id="repoModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content mc-dark">
+      <div class="modal-header mc-head">
+        <h5 class="modal-title" id="repoModalTitle">Findings</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0" id="repoModalBody"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Email preview -->
+<div class="modal fade" id="previewModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content mc-dark">
+      <div class="modal-header mc-head">
+        <h5 class="modal-title"><i class="fas fa-envelope me-2"></i>Email Preview</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0"><iframe id="previewFrame" style="width:100%;height:74vh;border:none"></iframe></div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index:9999">
+  <div id="toastEl" class="toast toast-s" role="alert"><div class="toast-body" id="toastMsg"></div></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
